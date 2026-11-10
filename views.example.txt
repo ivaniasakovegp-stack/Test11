@@ -1,0 +1,8 @@
+# One view per line. Lines starting with # are ignored.
+# Use schema.name, or bare name together with --default-schema.
+
+dm_ouod.proisshestviya_brd
+dm_ouod.aggr_kolichestvo_proisshestvij
+dm_ouod.link_table
+dm_ouod.spravochnik_do
+dm_udh_msnbi_dash_odou.v_fct_supervision_card
