@@ -15,6 +15,8 @@
 -- даёт сотни slices (ошибка «at most 300 slices are allowed»). Для org_keys
 -- иерархия не нужна — org_src и так ограничен фильтром БРД/ГПН-Снабжение,
 -- обход шёл только внутри этого набора и не расширял множество ключей.
+-- link_key через dense_rank (как в aggr_kolichestvo_proisshestvij): без повторного
+-- инлайна aggr_rows через JOIN к отдельному CTE link_keys.
 
 CREATE SCHEMA IF NOT EXISTS dm_ouod;
 
@@ -611,71 +613,175 @@ aggr_rows AS (
     UNION ALL
     SELECT data_aggr, do_po, tip, organizatsiya_key, hipo, qty FROM roll_rows
 ),
-link_keys AS (
+-- Те же разрезы и порядок, что row_number() OVER (...) по DISTINCT
+-- (typed ∪ aggr_rows). dense_rank не требует второго инлайна через JOIN.
+keyed AS (
     SELECT
-        row_number() OVER (
+        dense_rank() OVER (
             ORDER BY
                 u.data_aggr NULLS FIRST,
                 u.do_po NULLS FIRST,
                 u.tip NULLS FIRST,
                 u.organizatsiya_key NULLS FIRST
         ) AS link_key,
+        u.nomer,
+        u.ref_key,
+        u.data_proisshestviya,
         u.data_aggr,
-        u.do_po,
+        u.god,
+        u.mesyac,
+        u.zona,
+        u.uroven_znachimosti,
+        u.znachimost,
+        u.uroven,
+        u.pse,
+        u.vid,
+        u.vremya,
+        u.pogibshie_sotr,
+        u.postradavshie_sotr,
+        u.kolichestvopostradavshihpodryadchikov,
+        u.kolichestvopostradavshihrabotnikov,
+        u.kolichestvopostradavshihsubpodryadchikov,
+        u.postradavshie,
+        u.predotvratimoe,
+        u.uroven_vnimaniya,
+        u.mesto,
+        u.funkciya_key,
+        u.opisanie,
+        u.hipo,
+        u.oblast,
+        u.gruppa,
+        u.scenarij,
+        u.matrica_klassifikaciya,
+        u.matrica_opisanie,
+        u.posledstvie_key,
+        u.podryadchik_key,
+        u.svyaz,
         u.tip,
-        u.organizatsiya_key
+        u.is_detail
     FROM (
-        SELECT t.data_aggr, t.do_po, t.tip, t.organizatsiya_key
+        SELECT
+            t.nomer,
+            t.ref_key,
+            t.data_proisshestviya,
+            t.data_aggr,
+            t.do_po,
+            t.organizatsiya_key,
+            t.god,
+            t.mesyac,
+            t.zona,
+            t.uroven_znachimosti,
+            t.znachimost,
+            t.uroven,
+            t.pse,
+            t.vid,
+            t.vremya,
+            t.pogibshie_sotr,
+            t.postradavshie_sotr,
+            t.kolichestvopostradavshihpodryadchikov,
+            t.kolichestvopostradavshihrabotnikov,
+            t.kolichestvopostradavshihsubpodryadchikov,
+            t.postradavshie,
+            t.predotvratimoe,
+            t.uroven_vnimaniya,
+            t.mesto,
+            t.funkciya_key,
+            t.opisanie,
+            t.hipo,
+            t.oblast,
+            t.gruppa,
+            t.scenarij,
+            t.matrica_klassifikaciya,
+            t.matrica_opisanie,
+            t.posledstvie_key,
+            t.podryadchik_key,
+            t.svyaz,
+            t.tip,
+            1 AS is_detail
         FROM typed t
-        UNION
-        SELECT a.data_aggr, a.do_po, a.tip, a.organizatsiya_key
+        UNION ALL
+        SELECT
+            NULL::text AS nomer,
+            NULL::text AS ref_key,
+            NULL::date AS data_proisshestviya,
+            a.data_aggr,
+            a.do_po,
+            a.organizatsiya_key,
+            NULL::int AS god,
+            NULL::int AS mesyac,
+            NULL::text AS zona,
+            NULL::int AS uroven_znachimosti,
+            NULL::text AS znachimost,
+            NULL::int AS uroven,
+            NULL::text AS pse,
+            NULL::text AS vid,
+            NULL::time AS vremya,
+            NULL::numeric AS pogibshie_sotr,
+            NULL::numeric AS postradavshie_sotr,
+            NULL::numeric AS kolichestvopostradavshihpodryadchikov,
+            NULL::numeric AS kolichestvopostradavshihrabotnikov,
+            NULL::numeric AS kolichestvopostradavshihsubpodryadchikov,
+            NULL::numeric AS postradavshie,
+            NULL::boolean AS predotvratimoe,
+            NULL::int AS uroven_vnimaniya,
+            NULL::text AS mesto,
+            NULL::text AS funkciya_key,
+            NULL::text AS opisanie,
+            NULL::boolean AS hipo,
+            NULL::text AS oblast,
+            NULL::text AS gruppa,
+            NULL::text AS scenarij,
+            NULL::text AS matrica_klassifikaciya,
+            NULL::text AS matrica_opisanie,
+            NULL::text AS posledstvie_key,
+            NULL::text AS podryadchik_key,
+            NULL::text AS svyaz,
+            a.tip,
+            0 AS is_detail
         FROM aggr_rows a
+        GROUP BY a.data_aggr, a.do_po, a.tip, a.organizatsiya_key
     ) u
 )
 SELECT
     k.link_key AS link_key,
-    t.nomer AS nomer_proisshestviya,
-    t.ref_key,
-    t.data_proisshestviya AS data_proisshestviya,
-    t.data_aggr AS data_proisshestviya_aggr,
-    t.god AS god_proisshestviya,
-    t.mesyac AS mesyac_proisshestviya,
-    t.zona AS zona_otvetstvennosti,
-    t.uroven_znachimosti AS uroven_znachimosti,
-    t.znachimost AS znachimost,
-    t.uroven AS uroven,
-    t.pse AS mezhdunarodnyj_standart_pse,
-    t.vid AS vid_proisshestviya,
-    t.vremya AS vremya_proisshestviya,
-    t.pogibshie_sotr AS kolichestvo_pogibshih_sotrudnikov,
-    t.postradavshie_sotr AS kolichestvo_postradavshih_sotrudnikov,
-    t.kolichestvopostradavshihpodryadchikov AS kolichestvo_postradavshih_podryadchikov,
-    t.kolichestvopostradavshihrabotnikov AS kolichestvo_postradavshih_rabotnikov,
-    t.kolichestvopostradavshihsubpodryadchikov AS kolichestvo_postradavshih_subpodryadchikov,
-    t.postradavshie AS kolichestvo_pogibshih,
-    t.postradavshie AS kolichestvo_postradavshih,
-    t.predotvratimoe AS predotvratimost_proisshestviya,
-    t.postradavshie AS postradavshie,
-    t.uroven_vnimaniya AS uroven_vnimaniya,
-    t.mesto AS mesto,
-    t.funkciya_key,
-    t.opisanie AS opisanie,
-    t.hipo AS vysokopotencialnoe_proisshestvie,
-    t.oblast AS oblast,
-    t.gruppa AS gruppa,
-    t.scenarij AS scenarij,
-    t.matrica_klassifikaciya AS matrica_klassifikaciya,
-    t.matrica_opisanie AS matrica_opisanie,
-    t.posledstvie_key,
-    t.podryadchik_key,
-    t.svyaz AS svyaz_s_proizvodstvom,
-    t.tip AS utochnennyj_tip
-FROM typed t
-JOIN link_keys k
-  ON k.data_aggr IS NOT DISTINCT FROM t.data_aggr
- AND k.do_po IS NOT DISTINCT FROM t.do_po
- AND k.tip IS NOT DISTINCT FROM t.tip
- AND k.organizatsiya_key IS NOT DISTINCT FROM t.organizatsiya_key;
+    k.nomer AS nomer_proisshestviya,
+    k.ref_key,
+    k.data_proisshestviya AS data_proisshestviya,
+    k.data_aggr AS data_proisshestviya_aggr,
+    k.god AS god_proisshestviya,
+    k.mesyac AS mesyac_proisshestviya,
+    k.zona AS zona_otvetstvennosti,
+    k.uroven_znachimosti AS uroven_znachimosti,
+    k.znachimost AS znachimost,
+    k.uroven AS uroven,
+    k.pse AS mezhdunarodnyj_standart_pse,
+    k.vid AS vid_proisshestviya,
+    k.vremya AS vremya_proisshestviya,
+    k.pogibshie_sotr AS kolichestvo_pogibshih_sotrudnikov,
+    k.postradavshie_sotr AS kolichestvo_postradavshih_sotrudnikov,
+    k.kolichestvopostradavshihpodryadchikov AS kolichestvo_postradavshih_podryadchikov,
+    k.kolichestvopostradavshihrabotnikov AS kolichestvo_postradavshih_rabotnikov,
+    k.kolichestvopostradavshihsubpodryadchikov AS kolichestvo_postradavshih_subpodryadchikov,
+    k.postradavshie AS kolichestvo_pogibshih,
+    k.postradavshie AS kolichestvo_postradavshih,
+    k.predotvratimoe AS predotvratimost_proisshestviya,
+    k.postradavshie AS postradavshie,
+    k.uroven_vnimaniya AS uroven_vnimaniya,
+    k.mesto AS mesto,
+    k.funkciya_key,
+    k.opisanie AS opisanie,
+    k.hipo AS vysokopotencialnoe_proisshestvie,
+    k.oblast AS oblast,
+    k.gruppa AS gruppa,
+    k.scenarij AS scenarij,
+    k.matrica_klassifikaciya AS matrica_klassifikaciya,
+    k.matrica_opisanie AS matrica_opisanie,
+    k.posledstvie_key,
+    k.podryadchik_key,
+    k.svyaz AS svyaz_s_proizvodstvom,
+    k.tip AS utochnennyj_tip
+FROM keyed k
+WHERE k.is_detail = 1;
 
 COMMENT ON VIEW dm_ouod.proisshestviya_brd IS 'Происшествия зоны 1 с 01.01.2021. Две классификации на строку: матрица и область/сценарий. Ключ связи link_key.';
 
